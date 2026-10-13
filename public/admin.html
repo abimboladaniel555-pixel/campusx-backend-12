@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusX Admin</title>
+<style>
+:root{--bg:#090B12;--s1:#121622;--s2:#1B2030;--vio:#8B5CF6;--lime:#B7F56A;--red:#F43F5E;--tx:#F8FAFC;--mut:#9CA3AF;--line:rgba(255,255,255,.08)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--tx);font:14px/20px system-ui,sans-serif;max-width:900px;margin:auto;padding:20px 16px 60px}
+h1{font-size:22px}h2{font-size:17px;margin-bottom:6px}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+.mut{color:var(--mut)}.sm{font-size:12px}
+.row{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.acts{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.stats .card{margin:0;text-align:center}.stats b{font-size:28px;color:var(--lime);display:block}
+label{display:block;font-weight:600;margin:12px 0 4px}
+input,textarea{width:100%;background:var(--s2);border:1px solid var(--line);border-radius:10px;color:var(--tx);padding:10px 12px;font:inherit;margin-bottom:6px}
+input:focus,textarea:focus{border-color:var(--vio);outline:0}
+button{cursor:pointer;border:0;border-radius:99px;padding:8px 16px;background:var(--vio);color:#fff;font:inherit;font-weight:700}
+button.g{background:var(--s2);color:var(--tx);padding:6px 12px}
+button.del{background:rgba(244,63,94,.14);color:var(--red);padding:6px 12px}
+.item{padding:12px 0;border-top:1px solid var(--line)}.item:first-child{border-top:0}
+.tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.tabs button{background:var(--s1);color:var(--mut);border:1px solid var(--line)}
+.tabs button.on{background:var(--vio);color:#fff;border-color:var(--vio)}
+.err{color:var(--red);min-height:20px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--lime);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="row" style="margin-bottom:16px"><h1>CampusX Admin</h1><button id="out" class="g" style="display:none">Sign out</button></div>
+<div id="app"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const token = { get: () => localStorage.getItem('cx_token'), set: t => localStorage.setItem('cx_token', t), clear: () => localStorage.removeItem('cx_token') };
+const toast = m => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.append(t); setTimeout(() => t.remove(), 2000) };
+const ask = (q, cur = '') => prompt(q, cur);
+async function call(path, method = 'GET', body) {
+  const res = await fetch('/api' + path, { method, body: body ? JSON.stringify(body) : undefined,
+    headers: {'Content-Type': 'application/json', ...(token.get() ? {Authorization: 'Bearer ' + token.get()} : {})} });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error(data.error || 'Something went wrong.'); e.status = res.status; throw e; }
+  return data;
+}
+let tab = 'site';
+const FIELDS = [
+  ['campus_name','Campus name (top of the app)'],['campus_tag','Campus tag under each post'],['feed_name','Feed group name'],
+  ['compose_placeholder','Post box hint text'],['announcement','Announcement banner (leave empty to hide)','area'],
+  ['default_location','Default market location'],['categories','Market categories (separate with commas)'],
+  ['market_badge','Market badge'],['market_headline','Market headline'],['market_tagline','Market tagline'],
+  ['safe_tip','Safe trade tip','area'],['app_name','Browser tab title']
+];
+
+function loginScreen(msg = '') {
+  $('#out').style.display = 'none';
+  $('#app').innerHTML = `<div class="card" style="max-width:380px"><h2>Admin login</h2>
+    <input id="email" type="email" placeholder="Email"><input id="pass" type="password" placeholder="Password">
+    <p class="err" id="err">${esc(msg)}</p><button id="go">Log in</button></div>`;
+  $('#go').onclick = async () => {
+    try { const r = await call('/auth/login', 'POST', {email: $('#email').value.trim(), password: $('#pass').value}); token.set(r.token); render(); }
+    catch (e) { $('#err').textContent = e.message; }
+  };
+}
+const empty = t => `<p class="mut">${t}</p>`;
+const views = {
+  async site() {
+    const s = await call('/admin/settings');
+    return `<h2>Site text</h2><p class="mut sm">Change what students see. Save, then refresh the main app.</p>` +
+      FIELDS.map(([k, l, t]) => `<label for="s-${k}">${l}</label>` + (t ? `<textarea id="s-${k}" rows="3">${esc(s[k])}</textarea>` : `<input id="s-${k}" value="${esc(s[k])}">`)).join('') +
+      `<button id="save-site" style="margin-top:12px">Save changes</button>`;
+  },
+  async papers() {
+    const ps = await call('/admin/papers');
+    return `<h2>Add a file</h2><input id="p-title" placeholder="Title e.g. MTH 101 Past Questions"><input id="p-meta" placeholder="Short description e.g. 14 MB • Solved"><input id="p-url" placeholder="Download link (https://...)"><button id="add-paper">Add file</button>
+      <h2 style="margin-top:20px">Files (${ps.length})</h2>` + (ps.map(p => `<div class="item row"><div><b>${esc(p.title)}</b> ${p.active ? '' : '<span class="mut sm">(hidden)</span>'}<div class="mut sm">${esc(p.meta)} ${p.url ? '• link added' : '• no link yet'}</div></div>
+      <div class="acts"><button class="g" data-editpaper="${p.id}">Edit</button><button class="g" data-togpaper="${p.id}" data-on="${p.active}">${p.active ? 'Hide' : 'Show'}</button><button class="del" data-delpaper="${p.id}">Delete</button></div></div>`).join('') || empty('No files yet.'));
+  },
+  async polls() {
+    const ps = await call('/admin/polls');
+    return `<h2>Start a new poll</h2><p class="mut sm">It replaces the current poll on the Feed.</p><input id="pq" placeholder="Poll question"><input class="po" placeholder="Option 1"><input class="po" placeholder="Option 2"><input class="po" placeholder="Option 3 (optional)"><input class="po" placeholder="Option 4 (optional)"><button id="pgo">Publish poll</button>
+      <h2 style="margin-top:20px">All polls</h2>` + (ps.map(p => `<div class="item"><div class="row"><div><b>${esc(p.question)}</b> ${p.active ? '<span style="color:var(--lime)" class="sm">LIVE</span>' : ''}</div>
+      <div class="acts"><button class="g" data-editpoll="${p.id}">Edit</button>${p.active ? '' : `<button class="g" data-livepoll="${p.id}">Make live</button>`}<button class="del" data-delpoll="${p.id}">Delete</button></div></div>
+      <div class="mut sm">${p.options.map(o => esc(o.text) + ' (' + o.votes + ')').join(' • ')}</div></div>`).join('') || empty('No polls yet.'));
+  },
+  async posts() {
+    const ps = await call('/admin/posts');
+    return ps.map(p => `<div class="item row"><div><b>${esc(p.name)}</b> <span class="mut sm">${esc(p.created_at)}${p.anon ? ' • anonymous' : ''}</span><p>${esc(p.text)}</p></div>
+      <div class="acts"><button class="g" data-editpost="${p.id}">Edit</button><button class="del" data-delpost="${p.id}">Delete</button></div></div>`).join('') || empty('No posts yet.');
+  },
+  async listings() {
+    const ls = await call('/admin/listings');
+    return ls.map(l => `<div class="item row"><div><b>${esc(l.title)}</b> <span class="mut sm">₦${l.price} • ${esc(l.cat)} • ${esc(l.location)} • ${esc(l.seller)} • ${esc(l.status)}</span></div>
+      <div class="acts"><button class="g" data-editlist="${l.id}">Edit</button>${l.status === 'active' ? `<button class="g" data-statlist="${l.id}" data-s="sold">Mark sold</button><button class="del" data-statlist="${l.id}" data-s="removed">Remove</button>` : `<button class="g" data-statlist="${l.id}" data-s="active">Make active</button>`}</div></div>`).join('') || empty('No listings yet.');
+  },
+  async users() {
+    const us = await call('/admin/users');
+    return us.map(u => `<div class="item row"><div><b>${esc(u.name)}</b> <span class="mut sm">@${esc(u.handle)} • ${esc(u.email)} • ${esc(u.role)}${u.dept ? ' • ' + esc(u.dept) : ''}</span></div>
+      <div class="acts"><button class="g" data-edituser="${u.id}" data-name="${esc(u.name)}" data-dept="${esc(u.dept)}">Edit</button><button class="g" data-role="${u.id}" data-to="${u.role === 'admin' ? 'student' : 'admin'}">${u.role === 'admin' ? 'Remove admin' : 'Make admin'}</button></div></div>`).join('');
+  }
+};
+const TABS = [['site','Site text'],['papers','Past questions'],['polls','Polls'],['posts','Posts'],['listings','Listings'],['users','Students']];
+
+async function render() {
+  if (!token.get()) return loginScreen();
+  let stats;
+  try { stats = await call('/admin/stats'); }
+  catch (e) {
+    if (e.status === 403) { token.clear(); return loginScreen('This account is not an admin. Log in with an admin account.'); }
+    if (e.status === 401) { token.clear(); return loginScreen('Session expired. Log in again.'); }
+    $('#app').innerHTML = `<div class="card"><b>Can't load admin data</b><p class="mut sm">${esc(e.message)}. Check that the server is running.</p></div>`; return;
+  }
+  $('#out').style.display = '';
+  let body;
+  try { body = await views[tab](); } catch (e) { body = `<p class="err">${esc(e.message)}</p>`; }
+  $('#app').innerHTML = `<div class="stats"><div class="card"><b>${stats.users}</b><span class="mut sm">Students</span></div><div class="card"><b>${stats.posts}</b><span class="mut sm">Posts</span></div><div class="card"><b>${stats.listings}</b><span class="mut sm">Active listings</span></div></div>
+    <div class="tabs">${TABS.map(t => `<button class="${tab === t[0] ? 'on' : ''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div><div class="card">${body}</div>`;
+}
+
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button'); if (!t) return;
+  const d = t.dataset, id = t.id;
+  const done = async (m, fn) => { try { await fn(); toast(m); render(); } catch (err) { toast(err.message); } };
+  if (id === 'out') { token.clear(); return render(); }
+  if (d.tab) { tab = d.tab; return render(); }
+  if (id === 'save-site') return done('Saved. Refresh the main app to see it.', () => call('/admin/settings', 'PUT', Object.fromEntries(FIELDS.map(([k]) => [k, $('#s-' + k).value]))));
+  if (id === 'add-paper') return done('File added', () => call('/admin/papers', 'POST', {title: $('#p-title').value, meta: $('#p-meta').value, url: $('#p-url').value}));
+  if (d.editpaper) { const row = t.closest('.item'); const ps = await call('/admin/papers'); const p = ps.find(x => x.id == d.editpaper);
+    const title = ask('Title', p.title); if (title === null) return; const meta = ask('Short description', p.meta); if (meta === null) return; const url = ask('Download link (https://...)', p.url); if (url === null) return;
+    return done('File updated', () => call('/admin/papers/' + d.editpaper, 'PUT', {title, meta, url})); }
+  if (d.togpaper) return done('Updated', () => call('/admin/papers/' + d.togpaper, 'PUT', {active: d.on !== '1'}));
+  if (d.delpaper) { if (!confirm('Delete this file?')) return; return done('File deleted', () => call('/admin/papers/' + d.delpaper, 'DELETE')); }
+  if (id === 'pgo') return done('Poll published', () => call('/admin/poll', 'POST', {question: $('#pq').value, options: [...document.querySelectorAll('.po')].map(i => i.value)}));
+  if (d.editpoll) { const ps = await call('/admin/polls'); const p = ps.find(x => x.id == d.editpoll);
+    const question = ask('Poll question', p.question); if (question === null) return;
+    const options = []; for (const o of p.options) { const text = ask('Option text', o.text); if (text === null) return; options.push({id: o.id, text}); }
+    return done('Poll updated', () => call('/admin/polls/' + d.editpoll, 'PUT', {question, options})); }
+  if (d.livepoll) return done('Poll is now live', () => call('/admin/polls/' + d.livepoll, 'PUT', {active: true}));
+  if (d.delpoll) { if (!confirm('Delete this poll and its votes?')) return; return done('Poll deleted', () => call('/admin/polls/' + d.delpoll, 'DELETE')); }
+  if (d.editpost) { const ps = await call('/admin/posts'); const p = ps.find(x => x.id == d.editpost); const text = ask('Post text', p.text); if (text === null) return; return done('Post updated', () => call('/admin/posts/' + d.editpost, 'PUT', {text})); }
+  if (d.delpost) { if (!confirm('Delete this post?')) return; return done('Post deleted', () => call('/admin/posts/' + d.delpost, 'DELETE')); }
+  if (d.editlist) { const ls = await call('/admin/listings'); const l = ls.find(x => x.id == d.editlist);
+    const title = ask('Title', l.title); if (title === null) return; const price = ask('Price in naira', l.price); if (price === null) return; const location = ask('Location', l.location); if (location === null) return;
+    return done('Listing updated', () => call('/admin/listings/' + d.editlist, 'PUT', {title, price: +price, location})); }
+  if (d.statlist) return done('Listing updated', () => call('/admin/listings/' + d.statlist, 'PUT', {status: d.s}));
+  if (d.edituser) { const name = ask('Name', d.name); if (name === null) return; const dept = ask('Department', d.dept); if (dept === null) return; return done('Student updated', () => call('/admin/users/' + d.edituser, 'PUT', {name, dept})); }
+  if (d.role) { if (!confirm('Change this account to ' + d.to + '?')) return; return done('Role updated', () => call('/admin/users/' + d.role, 'PUT', {role: d.to})); }
+});
+render();
+</script>
+</body>
+</html>
